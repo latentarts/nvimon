@@ -1,0 +1,14 @@
+dist/
+.codex/
+SPEC.md
+IMPLEMENTATION_PLAN.md
+
+# Go build and coverage artifacts
+*.test
+*.out
+coverage.txt
+coverage.out
+
+# Local debug and editor state
+debug.log
+.DS_Store

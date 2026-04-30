@@ -1,0 +1,19 @@
+refresh_interval: 1s
+history_length: 120
+
+timeouts:
+  connect: 2s
+  request: 2s
+
+agent:
+  bind_address: 127.0.0.1:9910
+  auth_token: ""
+
+hosts:
+  - name: localhost
+    mode: local
+
+  - name: gpu-a
+    mode: remote
+    url: http://gpu-a:9910
+    token: ""

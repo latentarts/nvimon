@@ -1,0 +1,20 @@
+[Unit]
+Description=NVIMON Agent
+Documentation=https://github.com/prods/nvimon
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=@BINARY_PATH@ --config @CONFIG_PATH@
+WorkingDirectory=/var/lib/nvimon
+Restart=always
+RestartSec=2
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=full
+ReadWritePaths=/var/lib/nvimon
+
+[Install]
+WantedBy=multi-user.target
