@@ -2,9 +2,7 @@
 
 `nvimon` is a terminal-first NVIDIA GPU monitor for Linux hosts. It combines a Bubble Tea TUI, a lightweight remote agent, and a shared telemetry model so you can inspect local and remote machines without a browser or a full observability stack.
 
-```
 ![nvimon screenshot](docs/nvimon-screencap.png)
-```
 
 ## 🧭 Overview
 
