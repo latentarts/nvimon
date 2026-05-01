@@ -12,3 +12,7 @@ coverage.out
 # Local debug and editor state
 debug.log
 .DS_Store
+tmp/
+temp/
+nvimon
+nvimon-agent

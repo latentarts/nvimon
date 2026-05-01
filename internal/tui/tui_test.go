@@ -101,8 +101,4 @@ func TestAggregateSummaryAndSparklineFormatting(t *testing.T) {
 		t.Fatalf("sparkline contains question marks: %q", line)
 	}
 
-	bar := stackedBar(gpus, aggregateCompute, 10)
-	if strings.Count(bar, "█") >= 10 {
-		t.Fatalf("capacity-aware compute bar should not be fully filled: %q", bar)
-	}
 }
