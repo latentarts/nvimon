@@ -12,6 +12,7 @@ INSTALL_ETC_DIR=${INSTALL_ETC_DIR:-/etc/nvimon}
 INSTALL_STATE_DIR=${INSTALL_STATE_DIR:-/var/lib/nvimon}
 SYSTEMD_UNIT_DIR=${SYSTEMD_UNIT_DIR:-/etc/systemd/system}
 SERVICE_NAME=${SERVICE_NAME:-nvimon-agent}
+PROMPT_FOR_BIND_ADDRESS=${PROMPT_FOR_BIND_ADDRESS:-1}
 
 TARGET_BIN="${INSTALL_BIN_DIR}/nvimon-agent"
 TARGET_CONFIG="${INSTALL_ETC_DIR}/config.yaml"
@@ -28,6 +29,10 @@ fail() {
 
 have_command() {
   command -v "$1" >/dev/null 2>&1
+}
+
+have_tty() {
+  [[ -t 0 ]] || [[ -r /dev/tty ]]
 }
 
 files_differ() {
@@ -97,6 +102,15 @@ select_config_source() {
   fail "no config template found in dist/ or repo root"
 }
 
+read_config_bind_address() {
+  local config_path=$1
+  if [[ ! -f "${config_path}" ]]; then
+    return 1
+  fi
+
+  sed -n 's/^[[:space:]]*bind_address:[[:space:]]*//p' "${config_path}" | head -n 1
+}
+
 install_binary() {
   local source_binary=$1
   run_as_root install -d "${INSTALL_BIN_DIR}"
@@ -109,11 +123,126 @@ install_config_if_missing() {
 
   if run_as_root test -f "${TARGET_CONFIG}"; then
     log "keeping existing config at ${TARGET_CONFIG}"
-    return
+    return 1
   fi
 
   run_as_root install -m 0644 "${source_config}" "${TARGET_CONFIG}"
   log "installed default config to ${TARGET_CONFIG}"
+  return 0
+}
+
+list_bind_ip_candidates() {
+  local current_host=$1
+
+  {
+    printf '127.0.0.1\n'
+    printf '0.0.0.0\n'
+    if [[ -n "${current_host}" ]]; then
+      printf '%s\n' "${current_host}"
+    fi
+    if have_command hostname; then
+      hostname -I 2>/dev/null | tr ' ' '\n'
+    fi
+    if have_command ip; then
+      ip -o -4 addr show scope global 2>/dev/null | awk '{print $4}' | cut -d/ -f1
+    fi
+  } | awk 'NF { if (!seen[$0]++) print $0 }'
+}
+
+prompt_for_bind_address() {
+  local current_bind=$1
+  local bind_host=${current_bind%:*}
+  local bind_port=${current_bind##*:}
+
+  if [[ -n "${AGENT_BIND_ADDRESS:-}" ]]; then
+    printf '%s\n' "${AGENT_BIND_ADDRESS}"
+    return
+  fi
+
+  if [[ "${PROMPT_FOR_BIND_ADDRESS}" != "1" ]] || ! have_tty; then
+    printf '%s\n' "${current_bind}"
+    return
+  fi
+
+  local tty_path=/dev/tty
+  local selected_host=""
+  local selected_port=""
+  local -a candidates=()
+  local idx=1
+  local line=""
+
+  while IFS= read -r line; do
+    candidates+=("${line}")
+  done < <(list_bind_ip_candidates "${bind_host}")
+
+  printf '\n[nvimon-agent-install] available listen IPs:\n' >"${tty_path}"
+  for line in "${candidates[@]}"; do
+    printf '  %d) %s\n' "${idx}" "${line}" >"${tty_path}"
+    idx=$((idx + 1))
+  done
+  printf '[nvimon-agent-install] current bind address: %s\n' "${current_bind}" >"${tty_path}"
+
+  while true; do
+    printf '[nvimon-agent-install] select listen IP or enter a custom value [%s]: ' "${bind_host}" >"${tty_path}"
+    IFS= read -r selected_host <"${tty_path}" || selected_host=""
+    if [[ -z "${selected_host}" ]]; then
+      selected_host=${bind_host}
+    elif [[ "${selected_host}" =~ ^[0-9]+$ ]] && (( selected_host >= 1 && selected_host <= ${#candidates[@]} )); then
+      selected_host=${candidates[$((selected_host - 1))]}
+    fi
+    if [[ -n "${selected_host}" ]]; then
+      break
+    fi
+  done
+
+  while true; do
+    printf '[nvimon-agent-install] listen port [%s]: ' "${bind_port}" >"${tty_path}"
+    IFS= read -r selected_port <"${tty_path}" || selected_port=""
+    if [[ -z "${selected_port}" ]]; then
+      selected_port=${bind_port}
+    fi
+    if [[ "${selected_port}" =~ ^[0-9]+$ ]] && (( selected_port >= 1 && selected_port <= 65535 )); then
+      break
+    fi
+    printf '[nvimon-agent-install] invalid port: %s\n' "${selected_port}" >"${tty_path}"
+  done
+
+  printf '%s:%s\n' "${selected_host}" "${selected_port}"
+}
+
+update_bind_address() {
+  local desired_bind=$1
+  local current_bind=$2
+  local tmp_config
+
+  if [[ "${desired_bind}" == "${current_bind}" ]]; then
+    log "keeping bind address ${desired_bind}"
+    return 1
+  fi
+
+  tmp_config=$(mktemp)
+  trap 'rm -f "${tmp_config}"' RETURN
+
+  awk -v bind="${desired_bind}" '
+    /^[[:space:]]*bind_address:[[:space:]]*/ && !done {
+      indent = substr($0, 1, match($0, /bind_address:/) - 1)
+      print indent "bind_address: " bind
+      done = 1
+      next
+    }
+    { print }
+    END {
+      if (!done) {
+        print ""
+        print "agent:"
+        print "  bind_address: " bind
+      }
+    }
+  ' "${TARGET_CONFIG}" > "${tmp_config}"
+
+  run_as_root install -m 0644 "${tmp_config}" "${TARGET_CONFIG}"
+  log "updated bind address to ${desired_bind} in ${TARGET_CONFIG}"
+  return 0
 }
 
 service_exists() {
@@ -215,17 +344,36 @@ main() {
   fi
 
   local binary_changed=0
+  local config_changed=0
   local unit_changed=0
 
   if install_or_update_binary "${artifact_path}"; then
     binary_changed=1
   fi
-  install_config_if_missing "${config_source}"
+  if install_config_if_missing "${config_source}"; then
+    config_changed=1
+  fi
+
+  local current_bind
+  current_bind=$(read_config_bind_address "${TARGET_CONFIG}" || true)
+  if [[ -z "${current_bind}" ]]; then
+    current_bind=$(read_config_bind_address "${config_source}" || true)
+  fi
+  if [[ -z "${current_bind}" ]]; then
+    current_bind="127.0.0.1:9910"
+  fi
+
+  local desired_bind
+  desired_bind=$(prompt_for_bind_address "${current_bind}")
+  if update_bind_address "${desired_bind}" "${current_bind}"; then
+    config_changed=1
+  fi
+
   if install_or_update_service_unit; then
     unit_changed=1
   fi
 
-  if [[ ${binary_changed} -eq 1 || ${unit_changed} -eq 1 ]] || ! service_is_active; then
+  if [[ ${binary_changed} -eq 1 || ${config_changed} -eq 1 || ${unit_changed} -eq 1 ]] || ! service_is_active; then
     enable_and_restart_service
   else
     log "service ${SERVICE_NAME} already running with current binary and unit"

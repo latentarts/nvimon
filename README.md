@@ -1,187 +1,192 @@
 # NVIMON
 
-`nvimon` is a Go terminal application for monitoring NVIDIA GPUs across one or more Linux hosts. It is built as a small fleet monitoring stack:
+`nvimon` is a terminal-first NVIDIA GPU monitor for Linux hosts. It combines a Bubble Tea TUI, a lightweight remote agent, and a shared telemetry model so you can inspect local and remote machines without a browser or a full observability stack.
 
-- `nvimon`: Bubble Tea TUI for local and remote monitoring
-- `nvimon-agent`: lightweight HTTP agent for remote hosts
-- shared telemetry model, collectors, and transport code
+```
+![nvimon screenshot](docs/nvimon-screencap.png)
+```
 
-The goal is to give you a compact, operator-focused view of GPU usage, GPU-only processes, CPU/RAM load, and short-window history charts without requiring a browser or a full observability stack.
+## 🧭 Overview
 
-## What It Shows
+| Component | Purpose |
+| --- | --- |
+| `nvimon` | Interactive terminal UI for local and remote monitoring |
+| `nvimon-agent` | Lightweight HTTP agent for remote Linux hosts |
+| Shared model and collectors | Normalized host, GPU, and process telemetry |
 
-`nvimon` displays:
+## 📊 What It Shows
 
-- per-host CPU usage
-- per-host RAM usage
-- per-host aggregate GPU usage bars
-- per-GPU compute utilization
-- per-GPU VRAM usage
-- per-GPU temperature
-- per-GPU fan speed
-- per-GPU power draw
-- per-GPU performance/profile state
-- active GPU-using processes only
-- short history graphs for the key GPU metrics
-- host connection status and collector warnings
+| Area | Metrics / Views |
+| --- | --- |
+| Host health | CPU usage, RAM usage, uptime, load average, connection state, collector latency, warnings |
+| GPU fleet view | Aggregate GPU usage bars, per-host GPU counts, backend name |
+| Per-GPU detail | Compute utilization, VRAM usage, temperature, fan speed, power draw, power limit, clocks, pstate/profile |
+| GPU processes | Active GPU-using processes only, including PID, user, command, GPU index, and VRAM usage |
+| History | Short-window charts for key GPU metrics |
 
-The UI is designed to stay usable on both wide and short terminals, and it supports mouse/touch selection for host switching.
+The UI is designed to stay usable on both wide and short terminals, with mouse and touch support for switching hosts.
 
-## Architecture
+## 🏗️ Architecture
 
 ```mermaid
 flowchart LR
-  subgraph Hosts
-    L[Local Linux host]
-    R1[Remote Linux host]
-    R2[Remote Linux host]
+  subgraph hosts["Linux Hosts"]
+    local["Local host"]
+    remote1["Remote host A"]
+    remote2["Remote host B"]
   end
 
-  subgraph nvimon-agent
-    A1[HTTP API]
-    A2[Local collector]
-    A3[NVML or nvidia-smi]
-    A4[/proc and gopsutil]
-    A2 --> A3
-    A2 --> A4
-    A1 --> A2
+  subgraph app["nvimon"]
+    tui["Bubble Tea TUI"]
+    localCollector["Local collector"]
+    remoteClient["HTTP client"]
+    model["Normalized snapshot model"]
+    history["History store"]
   end
 
-  subgraph nvimon
-    TUI[Bubble Tea TUI]
-    C1[Local collector]
-    C2[HTTP client]
-    H[History store]
-    M[Normalized model]
-    TUI --> M
-    M --> H
-    M --> C1
-    M --> C2
+  subgraph agent["nvimon-agent"]
+    api["HTTP API"]
+    agentCollector["Local collector"]
+    gpuBackend["NVML or nvidia-smi"]
+    hostStats["/proc and gopsutil"]
   end
 
-  L --> C1
-  R1 --> A1
-  R2 --> A1
-  C2 --> A1
+  local --> localCollector
+  localCollector --> model
+  remote1 --> api
+  remote2 --> api
+  api --> agentCollector
+  agentCollector --> gpuBackend
+  agentCollector --> hostStats
+  api --> remoteClient
+  remoteClient --> model
+  model --> history
+  model --> tui
 ```
 
-The core design choice is to normalize all telemetry into one snapshot model. The TUI does not care whether data came from the local machine or from a remote agent.
+The core design choice is a single normalized snapshot model. The TUI does not need to care whether data came from the local machine or from a remote agent.
 
-## Backends
+## ⚙️ Backends
 
-The project supports two build/runtime paths for GPU telemetry:
+| Mode | Description | Best Use |
+| --- | --- | --- |
+| `local-nvml` | CGO-enabled build with NVIDIA NVML bindings | Native builds on compatible target hosts |
+| `portable` | CGO-disabled build that falls back to `nvidia-smi` | Portable deployments and simpler distribution |
 
-- `local-nvml`: CGO-enabled build with NVIDIA NVML bindings
-- `portable`: CGO-disabled build that falls back to `nvidia-smi`
+The default `make build` produces both variants:
 
-The `local-nvml` build is best produced on the target host or on a builder with a compatible libc and CPU baseline.
-
-The default `make build` produces both:
-
-- `dist/portable/nvimon`
-- `dist/portable/nvimon-agent`
-- `dist/local-nvml/nvimon`
-- `dist/local-nvml/nvimon-agent`
+| Artifact | Path |
+| --- | --- |
+| `nvimon` portable | `dist/portable/nvimon` |
+| `nvimon-agent` portable | `dist/portable/nvimon-agent` |
+| `nvimon` NVML | `dist/local-nvml/nvimon` |
+| `nvimon-agent` NVML | `dist/local-nvml/nvimon-agent` |
 
 The installer chooses the artifact that can actually run on the target host.
 
-## Data Collected
+### Choosing Between `portable` and `local-nvml`
 
-Per host:
+Use `portable` when you want the least fragile deployment. It is built with `CGO_ENABLED=0`, does not require NVML headers or a host-native CGO toolchain at build time, and collects GPU data by shelling out to `nvidia-smi`. That makes it easier to ship across mixed Linux hosts and simpler to install in automation. The tradeoff is that it depends on `nvidia-smi` being present in `PATH`, and process-level data is limited to what `nvidia-smi` exposes.
 
-- hostname
-- connection state
-- collector latency
-- collector warnings
-- CPU usage
-- RAM used and total
-- uptime
-- load average when available
-- total GPU count
-- GPU backend name
+Use `local-nvml` when you control the target host and want direct NVML access. It is a CGO-enabled build linked against NVIDIA's NVML bindings, so it can talk to the driver library directly instead of spawning `nvidia-smi` for the primary collection path. That usually makes it the better fit for native installs on NVIDIA-equipped machines, but it is less portable and more sensitive to host build/runtime compatibility.
 
-Per GPU:
+In practice:
 
-- index
-- UUID
-- product name
-- VRAM used and total
-- compute utilization
-- temperature
-- fan speed
-- power draw
-- power limit
-- clock data when available
-- pstate / profile
+| Variant | Pros | Cons | Good Default When |
+| --- | --- | --- | --- |
+| `portable` | Easiest to distribute, no CGO requirement, works well for remote installs and mixed fleets | Requires `nvidia-smi`; indirect collection path; less ideal if you want the most native integration | You want one build that is likely to run everywhere NVIDIA tools are already installed |
+| `local-nvml` | Direct NVML access, native integration, preferred when the host is known-good for NVML | Requires CGO/native compatibility; less portable across hosts | You manage the machine yourself and can rely on NVIDIA driver/NVML availability |
 
-GPU processes:
+Even the `local-nvml` build is not all-or-nothing: if NVML cannot initialize at runtime, nvimon falls back to `nvidia-smi` and records that fallback in collector warnings.
 
-- PID
-- user
-- command
-- GPU index
-- VRAM used by process
-- per-process SM/utilization fields when available
+## 🗂️ Data Collected
 
-Unavailable fields are shown as unknown rather than being faked as zero.
+### 🖥️ Host Snapshot
 
-## Build
+| Field | Notes |
+| --- | --- |
+| Hostname | Reported host identity |
+| Connection state | Local or remote availability state |
+| Collector latency | Collection round-trip timing |
+| Collector warnings | Backend or collection issues |
+| CPU usage | Per-host CPU utilization |
+| RAM used / total | Memory pressure at a glance |
+| Uptime | Host runtime |
+| Load average | When available |
+| Total GPU count | Number of visible GPUs |
+| GPU backend name | `nvml`, `nvidia-smi`, or equivalent |
 
-```bash
-make build
+### 🎮 GPU Snapshot
+
+| Field | Notes |
+| --- | --- |
+| Index and UUID | Stable device identity |
+| Product name | GPU model |
+| VRAM used / total | Memory usage |
+| Compute utilization | SM or equivalent utilization |
+| Temperature | Thermal state |
+| Fan speed | When available |
+| Power draw / limit | Power usage and cap |
+| Clock data | When available |
+| Pstate / profile | Performance state |
+
+### 🧵 GPU Process Snapshot
+
+| Field | Notes |
+| --- | --- |
+| PID | Process ID |
+| User | Owning user |
+| Command | Process command |
+| GPU index | Attached GPU |
+| VRAM used | Per-process GPU memory |
+| Per-process utilization fields | When exposed by the backend |
+
+Unavailable fields are shown as unknown rather than faked as zero.
+
+## 🔨 Build
+
+| Command | Result |
+| --- | --- |
+| `make build` | Build both variants into `dist/` and copy a default config to `dist/nvimon.config.yaml` |
+| `make build-portable` | Build the portable `nvidia-smi` variant only |
+| `make build-native` | Build the CGO/NVML-enabled variant only |
+
+## ▶️ Run
+
+| Task | Command |
+| --- | --- |
+| Launch the TUI locally | `./dist/portable/nvimon` |
+| Print one snapshot in text mode | `./dist/portable/nvimon --once` |
+| Print one snapshot as JSON | `./dist/portable/nvimon --once --json` |
+| Query a remote agent directly | `./dist/portable/nvimon --remote-snapshot http://host:9910 --remote-token TOKEN --json` |
+| Run the agent | `./dist/portable/nvimon-agent --config ./config.example.yaml` |
+
+## 🌐 Remote Install
+
+Paste one of these on the target machine:
+
+### Install Client
+
+```bash 
+<(curl -fsSL https://raw.githubusercontent.com/latentarts/nvimon/main/scripts/remote-install.sh) client`
 ```
 
-This builds both variants into `dist/` and copies a default config to `dist/nvimon.config.yaml`.
+### Install Server Agent
 
-Portable-only build:
-
-```bash
-make build-portable
+```bash 
+<(curl -fsSL https://raw.githubusercontent.com/latentarts/nvimon/main/scripts/remote-install.sh) client`
 ```
 
-CGO/NVML-enabled build:
+What the bootstrap installer does:
 
-```bash
-make build-native
-```
+| Mode | Behavior |
+| --- | --- |
+| `client` | Downloads the repo, builds `nvimon`, installs it to `~/.local/bin`, and creates `~/.config/nvimon/config.yaml` if missing |
+| `server` | Downloads the repo, builds the agent artifacts, runs the existing service installer, and prompts for the listen IP and port before restarting the service |
 
-## Run
+## 🧾 Configuration
 
-Run the TUI locally:
-
-```bash
-./dist/portable/nvimon
-```
-
-Run a single snapshot in text mode:
-
-```bash
-./dist/portable/nvimon --once
-```
-
-Emit JSON instead of the text summary:
-
-```bash
-./dist/portable/nvimon --once --json
-```
-
-Inspect a remote agent directly:
-
-```bash
-./dist/portable/nvimon --remote-snapshot http://host:9910 --remote-token TOKEN --json
-```
-
-Run the agent:
-
-```bash
-./dist/portable/nvimon-agent --config ./config.example.yaml
-```
-
-## Configuration
-
-The main config file is YAML. The default path is `~/.config/nvimon/config.yaml`, or you can pass `--config`.
-
-Example:
+The main config file is YAML. By default, `nvimon` reads `~/.config/nvimon/config.yaml`, or you can override it with `--config`.
 
 ```yaml
 refresh_interval: 1s
@@ -194,58 +199,78 @@ agent:
 hosts:
   - name: local
     mode: local
-  - name: gpu-a
+  - name: server
     mode: remote
     url: http://10.0.0.25:9910
     token: ""
 ```
 
-## Agent Install
+What it does:
 
-There is a simple Linux installer for the agent:
+| Step | Behavior |
+| --- | --- |
+| Binary selection | Looks under `dist/` and prefers `dist/local-nvml/nvimon-agent` when it can run |
+| Fallback | Uses `dist/portable/nvimon-agent` if the NVML build is not suitable |
+| Install path | Installs the binary to `/usr/local/bin` |
+| Service setup | Installs, enables, and restarts the systemd unit |
+| Updates | Replaces the installed agent safely when a newer binary is present |
 
-```bash
-./scripts/install-agent.sh
-```
+During install, the script prompts for the IP and port to bind. This is useful on multi-homed servers where `127.0.0.1:9910` is not the right default.
 
-It:
+The systemd unit template lives at `packaging/systemd/nvimon-agent.service`.
 
-- looks for the built agent binaries under `dist/`
-- prefers `dist/local-nvml/nvimon-agent` if it can run on the host
-- falls back to `dist/portable/nvimon-agent`
-- installs the binary to `/usr/local/bin`
-- installs a systemd service
-- enables and restarts the service
-- updates the install safely when a newer binary is present
 
-The systemd unit template lives in `packaging/systemd/nvimon-agent.service`.
+What it does:
 
-## UI Controls
+| Step | Behavior |
+| --- | --- |
+| Binary selection | Prefers `dist/local-nvml/nvimon` when it can run, otherwise falls back to `dist/portable/nvimon` |
+| Install path | Installs the binary to `~/.local/bin` by default |
+| Config setup | Creates `~/.config/nvimon/config.yaml` if it does not already exist |
+| Existing config | Leaves an existing config file untouched |
 
-- `0` selects all hosts
-- `1-9` selects a specific host
-- `j` / `k` cycles host scope
-- `x` toggles the GPU process pane
-- `/` starts process filtering
-- `w` opens the warnings dialog
-- `g` cycles aggregate mode
-- `p` pauses refresh
-- `r` refreshes immediately
-- `?` toggles help
-- click or tap a host row to select it
+## ⌨️ UI Controls
 
-## Repository Layout
+| Key | Action |
+| --- | --- |
+| `0` | Select all hosts |
+| `1-9` | Select a specific host |
+| `j` / `k` | Cycle host scope |
+| `x` | Toggle the GPU process pane |
+| `/` | Start process filtering |
+| `w` | Open the warnings dialog |
+| `g` | Cycle aggregate mode |
+| `p` | Pause refresh |
+| `r` | Refresh immediately |
+| `?` | Toggle help |
+| Click or tap | Select a host row |
 
-- `cmd/nvimon`: TUI entrypoint
-- `cmd/nvimon-agent`: agent entrypoint
-- `internal/collector`: local telemetry collection
-- `internal/model`: normalized snapshot structs and formatting
-- `internal/history`: ring buffers and time-series storage
-- `internal/transport/httpapi`: agent HTTP server and client
-- `internal/tui`: Bubble Tea UI and rendering
-- `scripts/install-agent.sh`: Linux agent install/update script
-- `packaging/systemd/nvimon-agent.service`: systemd unit template
+## 🗃️ Repository Layout
 
-## Status
+| Path | Purpose |
+| --- | --- |
+| `cmd/nvimon` | TUI entrypoint |
+| `cmd/nvimon-agent` | Agent entrypoint |
+| `internal/collector` | Local telemetry collection |
+| `internal/model` | Normalized snapshot structs and formatting |
+| `internal/history` | Ring buffers and time-series storage |
+| `internal/transport/httpapi` | Agent HTTP server and client |
+| `internal/tui` | Bubble Tea UI and rendering |
+| `scripts/install-client.sh` | Local CLI install script |
+| `scripts/install-agent.sh` | Linux agent install and update script |
+| `scripts/remote-install.sh` | Bootstrap installer for client and server machines |
+| `packaging/systemd/nvimon-agent.service` | Systemd unit template |
 
-The project is functional now and evolving toward a full multi-host GPU monitoring tool. The current focus is improving density, usability, and deployment ergonomics without losing the compact terminal-first workflow.
+## 🚧 Status
+
+The project is functional and evolving toward a more polished multi-host GPU monitoring workflow. Current work is focused on improving information density, usability, and deployment ergonomics without losing the compact terminal-first model.
+
+
+## 🤖 Transparency
+**Note on AI Usage:** While AI coding agents were used as a force multiplier for boilerplate and specific implementations, the architecture, logic flow, and final codebase were driven and validated by a human developer. This project is a human-led effort using AI as a sophisticated tool.
+
+---
+
+## 📜 License
+
+MIT License. See [LICENSE](LICENSE) for details.
