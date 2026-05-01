@@ -6,7 +6,7 @@ timeouts:
   request: 2s
 
 agent:
-  bind_address: 127.0.0.1:9910
+  bind_address: 0.0.0.0:9910
   auth_token: ""
 
 hosts:

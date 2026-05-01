@@ -165,22 +165,22 @@ Paste one of these on the target machine:
 
 ### Install Client
 
-```bash 
-<(curl -fsSL https://raw.githubusercontent.com/latentarts/nvimon/main/scripts/remote-install.sh) client`
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/latentarts/nvimon/main/scripts/remote-install.sh) client
 ```
 
 ### Install Server Agent
 
-```bash 
-<(curl -fsSL https://raw.githubusercontent.com/latentarts/nvimon/main/scripts/remote-install.sh) client`
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/latentarts/nvimon/main/scripts/remote-install.sh) server
 ```
 
 What the bootstrap installer does:
 
 | Mode | Behavior |
 | --- | --- |
-| `client` | Downloads the repo, builds `nvimon`, installs it to `~/.local/bin`, and creates `~/.config/nvimon/config.yaml` if missing |
-| `server` | Downloads the repo, builds the agent artifacts, runs the existing service installer, and prompts for the listen IP and port before restarting the service |
+| `client` | Downloads the latest portable release archive, extracts `nvimon`, installs it to `~/.local/bin`, and creates `~/.config/nvimon/config.yaml` if missing |
+| `server` | Downloads the latest portable release archive, extracts `nvimon-agent`, installs the systemd service, prompts for the listen IP and port, and starts the agent |
 
 ## 🧾 Configuration
 
@@ -213,7 +213,7 @@ What it does:
 | Service setup | Installs, enables, and restarts the systemd unit |
 | Updates | Replaces the installed agent safely when a newer binary is present |
 
-During install, the script prompts for the IP and port to bind. This is useful on multi-homed servers where `127.0.0.1:9910` is not the right default.
+During install, the script prompts for the IP and port to bind. It defaults to `0.0.0.0:9910`, which corresponds to `http://0.0.0.0:9910` for remote clients.
 
 The systemd unit template lives at `packaging/systemd/nvimon-agent.service`.
 

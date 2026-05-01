@@ -360,7 +360,7 @@ main() {
     current_bind=$(read_config_bind_address "${config_source}" || true)
   fi
   if [[ -z "${current_bind}" ]]; then
-    current_bind="127.0.0.1:9910"
+    current_bind="0.0.0.0:9910"
   fi
 
   local desired_bind
