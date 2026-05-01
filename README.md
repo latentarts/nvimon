@@ -166,13 +166,13 @@ Paste one of these on the target machine:
 ### Install Client
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/latentarts/nvimon/main/scripts/remote-install-client.sh)
+curl -fsSL https://raw.githubusercontent.com/latentarts/nvimon/main/scripts/remote-install-client.sh | bash
 ```
 
 ### Install Server Agent
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/latentarts/nvimon/main/scripts/remote-install-agent.sh)
+curl -fsSL https://raw.githubusercontent.com/latentarts/nvimon/main/scripts/remote-install-agent.sh | bash
 ```
 
 What the bootstrap installer does:
