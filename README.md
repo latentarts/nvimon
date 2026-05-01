@@ -182,6 +182,64 @@ What the bootstrap installer does:
 | `client` | Downloads the latest portable release archive, extracts `nvimon`, installs it to `~/.local/bin`, creates `~/.config/nvimon/config.yaml` if missing, and points you to that config path |
 | `server` | Downloads the latest portable release archive, extracts `nvimon-agent`, prompts for the listen IP and port, writes the default config to `/etc/nvimon/config.yaml`, installs the systemd service, enables it, and starts it |
 
+## 📦 Install From Release Tarball
+
+If you prefer not to use the bootstrap scripts, you can install directly from the published release archive.
+
+### Client
+
+1. Download the latest portable release tarball from the GitHub Releases page:
+   `nvimon_<tag>_linux_amd64_portable.tar.gz`
+2. Extract it:
+
+```bash
+tar -xzf nvimon_<tag>_linux_amd64_portable.tar.gz
+cd nvimon_<tag>_linux_amd64_portable
+```
+
+3. Run the client installer:
+
+```bash
+./scripts/install-client.sh
+```
+
+4. Review or edit the generated config at:
+   `~/.config/nvimon/config.yaml`
+5. Run the client:
+
+```bash
+~/.local/bin/nvimon
+```
+
+### Server Agent
+
+1. Download the latest portable release tarball from the GitHub Releases page:
+   `nvimon_<tag>_linux_amd64_portable.tar.gz`
+2. Extract it:
+
+```bash
+tar -xzf nvimon_<tag>_linux_amd64_portable.tar.gz
+cd nvimon_<tag>_linux_amd64_portable
+```
+
+3. Run the agent installer:
+
+```bash
+./scripts/install-agent.sh
+```
+
+4. When prompted, choose the listen IP and port. The default is `0.0.0.0:9910`.
+5. The installer will:
+   install `nvimon-agent` to `/usr/local/bin`
+   write the config to `/etc/nvimon/config.yaml`
+   install the systemd unit
+   enable and start `nvimon-agent`
+6. Check the service:
+
+```bash
+systemctl status nvimon-agent
+```
+
 ## 🧾 Configuration
 
 The main config file is YAML. By default, `nvimon` reads `~/.config/nvimon/config.yaml`, or you can override it with `--config`.
