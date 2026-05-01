@@ -166,21 +166,21 @@ Paste one of these on the target machine:
 ### Install Client
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/latentarts/nvimon/main/scripts/remote-install.sh) client
+bash <(curl -fsSL https://raw.githubusercontent.com/latentarts/nvimon/main/scripts/remote-install-client.sh)
 ```
 
 ### Install Server Agent
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/latentarts/nvimon/main/scripts/remote-install.sh) server
+bash <(curl -fsSL https://raw.githubusercontent.com/latentarts/nvimon/main/scripts/remote-install-agent.sh)
 ```
 
 What the bootstrap installer does:
 
 | Mode | Behavior |
 | --- | --- |
-| `client` | Downloads the latest portable release archive, extracts `nvimon`, installs it to `~/.local/bin`, and creates `~/.config/nvimon/config.yaml` if missing |
-| `server` | Downloads the latest portable release archive, extracts `nvimon-agent`, installs the systemd service, prompts for the listen IP and port, and starts the agent |
+| `client` | Downloads the latest portable release archive, extracts `nvimon`, installs it to `~/.local/bin`, creates `~/.config/nvimon/config.yaml` if missing, and points you to that config path |
+| `server` | Downloads the latest portable release archive, extracts `nvimon-agent`, prompts for the listen IP and port, writes the default config to `/etc/nvimon/config.yaml`, installs the systemd service, enables it, and starts it |
 
 ## 🧾 Configuration
 
@@ -256,7 +256,8 @@ What it does:
 | `internal/tui` | Bubble Tea UI and rendering |
 | `scripts/install-client.sh` | Local CLI install script |
 | `scripts/install-agent.sh` | Linux agent install and update script |
-| `scripts/remote-install.sh` | Bootstrap installer for client and server machines |
+| `scripts/remote-install-client.sh` | Bootstrap installer for the CLI |
+| `scripts/remote-install-agent.sh` | Bootstrap installer for the agent |
 | `packaging/systemd/nvimon-agent.service` | Systemd unit template |
 
 ## 🚧 Status

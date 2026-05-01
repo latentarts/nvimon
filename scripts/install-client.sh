@@ -63,7 +63,7 @@ install_default_config_if_missing() {
 
   if [[ -f "${TARGET_CONFIG}" ]]; then
     log "keeping existing config at ${TARGET_CONFIG}"
-    return
+    return 1
   fi
 
   cat >"${TARGET_CONFIG}" <<'EOF'
@@ -84,6 +84,7 @@ hosts:
 EOF
 
   log "installed default config to ${TARGET_CONFIG}"
+  return 0
 }
 
 print_path_hint() {
@@ -103,11 +104,19 @@ main() {
   artifact_path=$(select_cli_artifact)
 
   install_binary "${artifact_path}"
-  install_default_config_if_missing
+  local config_created=0
+  if install_default_config_if_missing; then
+    config_created=1
+  fi
   print_path_hint
 
   log "binary: ${TARGET_BIN}"
   log "config: ${TARGET_CONFIG}"
+  if [[ ${config_created} -eq 1 ]]; then
+    log "edit ${TARGET_CONFIG} to add remote hosts or change defaults"
+  else
+    log "review ${TARGET_CONFIG} if you need to change hosts or timeouts"
+  fi
   log "test: ${TARGET_BIN} --once"
 }
 

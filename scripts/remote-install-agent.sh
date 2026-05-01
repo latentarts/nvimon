@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-MODE=${1:-}
-
 REPO_OWNER=${REPO_OWNER:-latentarts}
 REPO_NAME=${REPO_NAME:-nvimon}
 NVIMON_REF=${NVIMON_REF:-latest}
@@ -19,15 +17,6 @@ fail() {
 
 have_command() {
   command -v "$1" >/dev/null 2>&1
-}
-
-usage() {
-  cat <<'EOF'
-usage: remote-install.sh client|server
-
-Downloads the latest portable nvimon release archive, extracts the binaries,
-and runs the matching installer.
-EOF
 }
 
 download_to_path() {
@@ -70,14 +59,14 @@ find_portable_asset_url() {
 }
 
 download_release_archive() {
-  local dest_path=$1
+  local archive_path=$1
   local metadata_path=$2
   local asset_url
 
   fetch_release_metadata "${metadata_path}"
   asset_url=$(find_portable_asset_url "${metadata_path}")
   log "downloading portable release archive from ${asset_url}"
-  download_to_path "${asset_url}" "${dest_path}"
+  download_to_path "${asset_url}" "${archive_path}"
 }
 
 find_release_bundle_dir() {
@@ -105,25 +94,15 @@ prepare_installer_layout() {
   install -m 0644 "${bundle_dir}/nvimon-agent.service" "${install_root}/packaging/systemd/nvimon-agent.service"
 }
 
-main() {
-  case "${MODE}" in
-    client|server)
-      ;;
-    *)
-      usage >&2
-      exit 1
-      ;;
-  esac
-
+prepare_latest_portable_layout() {
   have_command find || fail "find is required"
   have_command install || fail "install is required"
   have_command mktemp || fail "mktemp is required"
   have_command sed || fail "sed is required"
   have_command tar || fail "tar is required"
 
-  local work_dir archive_path metadata_path bundle_dir install_root
+  local work_dir archive_path metadata_path install_root bundle_dir
   work_dir=$(mktemp -d "${TMP_ROOT}/nvimon-install.XXXXXX")
-  trap 'rm -rf "${work_dir}"' EXIT
   archive_path="${work_dir}/nvimon.tar.gz"
   metadata_path="${work_dir}/release.json"
   install_root="${work_dir}/installer"
@@ -132,10 +111,28 @@ main() {
   tar -xzf "${archive_path}" -C "${work_dir}"
   bundle_dir=$(find_release_bundle_dir "${work_dir}")
   prepare_installer_layout "${bundle_dir}" "${install_root}"
+  printf '%s\n' "${install_root}"
+}
 
-  if [[ "${MODE}" == "client" ]]; then
-    exec "${install_root}/scripts/install-client.sh"
+usage() {
+  cat <<'EOF'
+usage: remote-install-agent.sh
+
+Downloads the latest portable nvimon release archive, installs the agent
+binary, writes the default config, installs the systemd service, enables it,
+and starts it.
+EOF
+}
+
+main() {
+  if [[ $# -ne 0 ]]; then
+    usage >&2
+    exit 1
   fi
+
+  local install_root
+  install_root=$(prepare_latest_portable_layout)
+  trap 'rm -rf "${install_root%/installer}"' EXIT
 
   exec "${install_root}/scripts/install-agent.sh"
 }
