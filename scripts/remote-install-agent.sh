@@ -88,10 +88,10 @@ prepare_installer_layout() {
 
   install -m 0755 "${bundle_dir}/nvimon" "${install_root}/dist/portable/nvimon"
   install -m 0755 "${bundle_dir}/nvimon-agent" "${install_root}/dist/portable/nvimon-agent"
-  install -m 0755 "${bundle_dir}/install-client.sh" "${install_root}/scripts/install-client.sh"
-  install -m 0755 "${bundle_dir}/install-agent.sh" "${install_root}/scripts/install-agent.sh"
+  install -m 0755 "${bundle_dir}/scripts/install-client.sh" "${install_root}/scripts/install-client.sh"
+  install -m 0755 "${bundle_dir}/scripts/install-agent.sh" "${install_root}/scripts/install-agent.sh"
   install -m 0644 "${bundle_dir}/config.example.yaml" "${install_root}/config.example.yaml"
-  install -m 0644 "${bundle_dir}/nvimon-agent.service" "${install_root}/packaging/systemd/nvimon-agent.service"
+  install -m 0644 "${bundle_dir}/packaging/systemd/nvimon-agent.service" "${install_root}/packaging/systemd/nvimon-agent.service"
 }
 
 prepare_latest_portable_layout() {

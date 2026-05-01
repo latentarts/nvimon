@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - '*'
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -40,14 +41,15 @@ jobs:
             package_name="nvimon_${TAG}_linux_amd64_${variant}"
             package_dir="${stage_dir}/${package_name}"
 
-            mkdir -p "${package_dir}"
+            mkdir -p "${package_dir}/scripts"
+            mkdir -p "${package_dir}/packaging/systemd"
             cp "dist/${variant}/nvimon" "${package_dir}/"
             cp "dist/${variant}/nvimon-agent" "${package_dir}/"
             cp config.example.yaml "${package_dir}/"
             cp LICENSE "${package_dir}/"
-            cp scripts/install-client.sh "${package_dir}/"
-            cp scripts/install-agent.sh "${package_dir}/"
-            cp packaging/systemd/nvimon-agent.service "${package_dir}/"
+            cp scripts/install-client.sh "${package_dir}/scripts/"
+            cp scripts/install-agent.sh "${package_dir}/scripts/"
+            cp packaging/systemd/nvimon-agent.service "${package_dir}/packaging/systemd/"
 
             tar -C "${stage_dir}" -czf "${release_dir}/${package_name}.tar.gz" "${package_name}"
           done
