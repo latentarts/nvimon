@@ -142,6 +142,29 @@ func TestProcessVizViewShowsProcessDots(t *testing.T) {
 	}
 }
 
+func TestGPUCardsExpandWhenProcessPanelHidden(t *testing.T) {
+	sample := collector.NewSampleCollector("host-a", "gpu-a", time.Second)
+	snapshot, err := sample.Collect(context.Background())
+	if err != nil {
+		t.Fatalf("collect sample snapshot: %v", err)
+	}
+
+	m := New([]hostSource{
+		localSource{name: "host-a", collector: sample},
+	}, time.Second, 16)
+	m.width = 120
+	m.height = 48
+	m.showProcesses = false
+	m.hosts[0].snapshot = snapshot
+	m.hosts[0].lastSuccessful = snapshot.Timestamp
+	m.recordHistory(snapshot)
+
+	height := lipgloss.Height(m.renderGPUCards())
+	if height <= gpuCardContentLines+cardBorder {
+		t.Fatalf("gpu cards height = %d, want > %d when process panel hidden", height, gpuCardContentLines+cardBorder)
+	}
+}
+
 func TestRenderProcessesUsesViewport(t *testing.T) {
 	m := New([]hostSource{
 		stubHostSource{name: "host-a"},

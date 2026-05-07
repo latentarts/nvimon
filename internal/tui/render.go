@@ -12,6 +12,7 @@ import (
 )
 
 const cardBorder = 2 // rounded border adds 2 chars (1 each side)
+const gpuCardContentLines = 9
 
 func (m Model) render() string {
 	header := m.renderHeader()
@@ -225,23 +226,39 @@ func (m Model) renderGPUCards() string {
 		cardWidth = max(30, (m.width-cols*cardBorder-gap*(cols-1))/cols)
 	}
 
-	rows := make([]string, 0, (len(all)+cols-1)/cols)
+	rowCount := max(1, (len(all)+cols-1)/cols)
+	rowGap := 0
+	cardHeight := gpuCardContentLines + cardBorder
+	if !m.showProcesses {
+		availableHeight := m.gpuSectionHeight()
+		if rowCount > 1 {
+			rowGap = min(2, max(0, (availableHeight-rowCount*cardHeight)/(rowCount-1)))
+		}
+		if availableHeight > 0 {
+			cardHeight = max(cardHeight, (availableHeight-rowGap*(rowCount-1))/rowCount)
+		}
+	}
+
+	rows := make([]string, 0, rowCount*2)
 	for i := 0; i < len(all); i += cols {
 		end := min(i+cols, len(all))
 		rowCards := make([]string, 0, (end-i)*2)
 		for j, item := range all[i:end] {
-			rowCards = append(rowCards, m.renderGPUCard(item, cardWidth))
+			rowCards = append(rowCards, m.renderGPUCard(item, cardWidth, cardHeight))
 			if j < (end-i-1) {
 				rowCards = append(rowCards, "  ")
 			}
 		}
 		rows = append(rows, lipgloss.JoinHorizontal(lipgloss.Top, rowCards...))
+		if rowGap > 0 && end < len(all) {
+			rows = append(rows, strings.Repeat("\n", rowGap-1))
+		}
 	}
 
 	return lipgloss.JoinVertical(lipgloss.Left, rows...)
 }
 
-func (m Model) renderGPUCard(item hostGPU, width int) string {
+func (m Model) renderGPUCard(item hostGPU, width, height int) string {
 	gpu := item.gpu
 	key := gpu.Key(item.host.snapshot.HostID)
 	contentWidth := max(10, width-2)
@@ -270,8 +287,9 @@ func (m Model) renderGPUCard(item hostGPU, width int) string {
 		styles.label.Render("PWR ") + sparklineWithStyle(m.history.Series(key+"/power"), contentWidth-10, maxMetric(gpu.PowerLimitW, 300), styles.sparkPower) + " " + styles.value.Render(metricCompact(gpu.PowerW)+"W"),
 		styles.label.Render("TMP ") + sparklineWithStyle(m.history.Series(key+"/temp"), contentWidth-10, 100, styles.sparkTemp) + " " + styles.value.Render(metricCompact(gpu.TemperatureC)+"C"),
 	}
+	lines = stretchCardLines(lines, max(gpuCardContentLines, height-cardBorder))
 
-	return styles.gpuCard.Width(width).Render(strings.Join(lines, "\n"))
+	return styles.gpuCard.Width(width).Height(max(gpuCardContentLines+cardBorder, height)).Render(strings.Join(lines, "\n"))
 }
 
 func (m Model) renderProcesses() string {
@@ -446,6 +464,38 @@ func segmentedGauge(metric model.MetricValue, width int, segments []barSegment) 
 	return builder.String()
 }
 
+func stretchCardLines(lines []string, target int) []string {
+	if len(lines) >= target || len(lines) < 2 {
+		return lines
+	}
+
+	extra := target - len(lines)
+	priorities := []int{1, 3, 4, 5, 6, 7, 2, 0}
+	insertAfter := make([]int, len(lines)-1)
+	for i := 0; i < extra; i++ {
+		gap := priorities[i%len(priorities)]
+		if gap >= len(insertAfter) {
+			gap = len(insertAfter) - 1
+		}
+		if gap < 0 {
+			gap = 0
+		}
+		insertAfter[gap]++
+	}
+
+	stretched := make([]string, 0, target)
+	for i, line := range lines {
+		stretched = append(stretched, line)
+		if i >= len(insertAfter) {
+			continue
+		}
+		for j := 0; j < insertAfter[i]; j++ {
+			stretched = append(stretched, "")
+		}
+	}
+	return stretched
+}
+
 func sparkline(points []history.Point, width int, maxValue float64) string {
 	return sparklineWithStyle(points, width, maxValue, styles.sparkGPU)
 }
@@ -548,6 +598,23 @@ func maxMetric(v model.MetricValue, fallback float64) float64 {
 		return v.Value
 	}
 	return fallback
+}
+
+func (m Model) gpuSectionHeight() int {
+	if m.height <= 0 {
+		return gpuCardContentLines + cardBorder
+	}
+	header := lipgloss.Height(m.renderHeader())
+	footer := lipgloss.Height(m.renderFooter())
+	selectorWidth := hostSelectorWidth()
+	summaryWidth := max(30, m.width-selectorWidth-1)
+	topRow := lipgloss.JoinHorizontal(
+		lipgloss.Top,
+		m.renderHostSelector(),
+		m.renderSummary(summaryWidth),
+	)
+	available := m.height - header - footer - lipgloss.Height(topRow)
+	return max(gpuCardContentLines+cardBorder, available)
 }
 
 func formatUptime(seconds uint64) string {
