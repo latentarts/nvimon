@@ -133,11 +133,12 @@ func (m Model) renderSummaryCard(host hostState, width int) string {
 
 	ramPct := memoryPercent(host.snapshot)
 
-	var gpuPct, vramPct, pwrPct model.MetricValue
+	var gpuPct, vramPct, pwrPct, pwrUsedMetric model.MetricValue
 	if !noData {
 		var gpuTotal, gpuCount float64
 		var vramUsed, vramTotal uint64
 		var pwrUsed, pwrLimit float64
+		var pwrKnown bool
 		for _, g := range host.snapshot.GPUs {
 			if g.GPUUtilPct.IsKnown() {
 				gpuTotal += g.GPUUtilPct.Value
@@ -147,6 +148,7 @@ func (m Model) renderSummaryCard(host hostState, width int) string {
 			vramTotal += g.MemoryTotalBytes
 			if g.PowerW.IsKnown() {
 				pwrUsed += g.PowerW.Value
+				pwrKnown = true
 			}
 			if g.PowerLimitW.IsKnown() {
 				pwrLimit += g.PowerLimitW.Value
@@ -160,6 +162,9 @@ func (m Model) renderSummaryCard(host hostState, width int) string {
 		}
 		if pwrLimit > 0 {
 			pwrPct = model.NewMetricValue(pwrUsed / pwrLimit * 100)
+		}
+		if pwrKnown {
+			pwrUsedMetric = model.NewMetricValue(pwrUsed)
 		}
 	}
 
@@ -185,7 +190,7 @@ func (m Model) renderSummaryCard(host hostState, width int) string {
 		rowStyle.Render(styles.label.Render("RAM  ") + gauge(ramPct, gaugeBarWidth) + " " + styles.value.Render(model.FormatPercent(ramPct))),
 		rowStyle.Render(styles.label.Render("GPU  ") + gauge(gpuPct, gaugeBarWidth) + " " + styles.value.Render(model.FormatPercent(gpuPct))),
 		rowStyle.Render(styles.label.Render("VRAM ") + gauge(vramPct, gaugeBarWidth) + " " + styles.value.Render(model.FormatPercent(vramPct))),
-		rowStyle.Render(styles.label.Render("PWR  ") + gauge(pwrPct, gaugeBarWidth) + " " + styles.value.Render(model.FormatPercent(pwrPct))),
+		rowStyle.Render(styles.label.Render("PWR  ") + gauge(pwrPct, gaugeBarWidth) + " " + styles.value.Render(metricCompact(pwrUsedMetric)+"W")),
 		lastLine,
 	}
 
@@ -386,8 +391,7 @@ func aggregateSummary(gpus []model.GPUSnapshot, mode aggregateMode) (string, str
 			}
 		}
 		if limit > 0 {
-			pct := (used / limit) * 100
-			return "power", fmt.Sprintf("%.0f%% %.0fW", pct, used)
+			return "power", fmt.Sprintf("%.0f/%.0fW", used, limit)
 		}
 		if used > 0 {
 			return "power", fmt.Sprintf("%.0fW", used)
