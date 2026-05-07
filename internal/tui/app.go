@@ -68,6 +68,7 @@ type Model struct {
 	showWarnings  bool
 	showProcesses bool
 	showProcessViz bool
+	processScroll int
 	aggregateMode aggregateMode
 	filterMode    bool
 	processFilter string
@@ -164,6 +165,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.showProcesses = !m.showProcesses
 			if !m.showProcesses {
 				m.filterMode = false
+				m.processScroll = 0
 			}
 			return m, nil
 		case "v":
@@ -196,6 +198,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.selectedIndex = len(m.hosts) - 1
 				}
 			}
+			return m, nil
+		case "pgdown", "ctrl+f":
+			m.scrollProcesses(m.processViewportRows())
+			return m, nil
+		case "pgup", "ctrl+b":
+			m.scrollProcesses(-m.processViewportRows())
+			return m, nil
+		case "end":
+			m.processScroll = m.maxProcessScroll()
+			return m, nil
+		case "home":
+			m.processScroll = 0
 			return m, nil
 		}
 		if len(msg.Runes) == 1 && msg.Runes[0] >= '0' && msg.Runes[0] <= '9' {
@@ -231,6 +245,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 		}
+		if m.showProcesses && !m.filterMode && msg.Action == tea.MouseActionPress {
+			switch msg.Button {
+			case tea.MouseButtonWheelDown:
+				m.scrollProcesses(3)
+				return m, nil
+			case tea.MouseButtonWheelUp:
+				m.scrollProcesses(-3)
+				return m, nil
+			}
+		}
 	case tickMsg:
 		if m.paused {
 			return m, tickCmd(m.refreshInterval)
@@ -257,6 +281,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.hosts[result.index].lastError = ""
 			m.recordHistory(result.snapshot)
 		}
+		m.processScroll = min(m.processScroll, m.maxProcessScroll())
 		return m, nil
 	}
 
@@ -416,6 +441,61 @@ func (m Model) processColor(process hostProcess) lipgloss.Color {
 		sum += int(ch)
 	}
 	return palette[sum%len(palette)]
+}
+
+func (m *Model) scrollProcesses(delta int) {
+	if !m.showProcesses {
+		m.processScroll = 0
+		return
+	}
+	m.processScroll += delta
+	if m.processScroll < 0 {
+		m.processScroll = 0
+	}
+	maxScroll := m.maxProcessScroll()
+	if m.processScroll > maxScroll {
+		m.processScroll = maxScroll
+	}
+}
+
+func (m Model) maxProcessScroll() int {
+	processes := m.filteredProcesses()
+	rows := m.processViewportRows()
+	if rows <= 0 || len(processes) <= rows {
+		return 0
+	}
+	return len(processes) - rows
+}
+
+func (m Model) processViewportRows() int {
+	height := m.processViewportHeight()
+	headerLines := 3
+	if m.processFilter != "" {
+		headerLines++
+	}
+	rows := height - headerLines - 2
+	if rows < 1 {
+		return 1
+	}
+	return rows
+}
+
+func (m Model) processViewportHeight() int {
+	if m.height <= 0 {
+		return 8
+	}
+	header := lipgloss.Height(m.renderHeader())
+	footer := lipgloss.Height(m.renderFooter())
+	selectorWidth := hostSelectorWidth()
+	summaryWidth := max(30, m.width-selectorWidth-1)
+	topRow := lipgloss.JoinHorizontal(
+		lipgloss.Top,
+		m.renderHostSelector(),
+		m.renderSummary(summaryWidth),
+	)
+	gpus := m.renderGPUCards()
+	available := m.height - header - footer - lipgloss.Height(topRow) - lipgloss.Height(gpus)
+	return max(8, available)
 }
 
 func fetchSnapshotsCmd(sources []hostSource, refresh time.Duration) tea.Cmd {

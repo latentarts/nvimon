@@ -41,6 +41,7 @@ func (m Model) render() string {
 		overlay := styles.helpBox.Render(strings.Join([]string{
 			"tap/click host rows to select scope",
 			"/ filter processes",
+			"pgup/pgdn home/end scroll process list",
 			"enter apply filter",
 			"esc clear/exit filter",
 			"p pause/resume refresh",
@@ -274,6 +275,7 @@ func (m Model) renderGPUCard(item hostGPU, width int) string {
 }
 
 func (m Model) renderProcesses() string {
+	panelHeight := m.processViewportHeight()
 	lines := []string{styles.label.Render("GPU Processes")}
 	processes := m.filteredProcesses()
 	scopeLabel := "all servers"
@@ -286,11 +288,14 @@ func (m Model) renderProcesses() string {
 	}
 	if len(processes) == 0 {
 		lines = append(lines, "No matching GPU compute processes.")
-		return styles.panel.Width(max(30, m.width)).Render(strings.Join(lines, "\n"))
+		return styles.panel.Width(max(40, m.width)).Height(panelHeight).Render(strings.Join(lines, "\n"))
 	}
 
 	lines = append(lines, styles.tableHead.Render(fmt.Sprintf("%-10s %-7s %-10s %-4s %-9s %-8s %s", "SERVER", "PID", "USER", "GPU", "VRAM", "UTIL", "COMMAND")))
-	for _, row := range processes {
+	visibleRows := m.processViewportRows()
+	start := min(m.processScroll, max(0, len(processes)-visibleRows))
+	end := min(len(processes), start+visibleRows)
+	for _, row := range processes[start:end] {
 		prefix := ""
 		if m.showProcessViz {
 			prefix = lipgloss.NewStyle().Foreground(m.processColor(row)).Render("●") + " "
@@ -306,12 +311,13 @@ func (m Model) renderProcesses() string {
 			truncate(row.process.Command, max(12, m.width-60)),
 		)))
 	}
+	lines = append(lines, styles.muted.Render(fmt.Sprintf("showing %d-%d of %d  pgup/pgdn home/end scroll", start+1, end, len(processes))))
 
-	return styles.panel.Width(max(40, m.width)).Render(strings.Join(lines, "\n"))
+	return styles.panel.Width(max(40, m.width)).Height(panelHeight).Render(strings.Join(lines, "\n"))
 }
 
 func (m Model) renderFooter() string {
-	message := "0 all  1-9 server  j/k cycle  click/tap host  / filter  w warnings  x toggle-proc  v process-viz  esc clear  p pause  r refresh  g aggregate  ? help"
+	message := "0 all  1-9 server  j/k cycle  pgup/pgdn proc-scroll  click/tap host  / filter  w warnings  x toggle-proc  v process-viz  esc clear  p pause  r refresh  g aggregate  ? help"
 	if m.lastError != "" {
 		message += "  error: " + m.lastError
 	}

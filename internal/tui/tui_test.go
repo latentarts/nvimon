@@ -141,3 +141,37 @@ func TestProcessVizViewShowsProcessDots(t *testing.T) {
 		t.Fatalf("expected process dots for visible processes: %q", view)
 	}
 }
+
+func TestRenderProcessesUsesViewport(t *testing.T) {
+	m := New([]hostSource{
+		stubHostSource{name: "host-a"},
+	}, time.Second, 8)
+	m.width = 120
+	m.height = 12
+	m.processScroll = 2
+	m.hosts[0].snapshot = model.HostSnapshot{
+		HostID:   "host-a",
+		Hostname: "host-a",
+		GPUs: []model.GPUSnapshot{
+			{Index: 0, UUID: "GPU-0"},
+		},
+		GPUProcesses: []model.GPUProcess{
+			{PID: 1, GPUIndex: 0, Command: "cmd-1"},
+			{PID: 2, GPUIndex: 0, Command: "cmd-2"},
+			{PID: 3, GPUIndex: 0, Command: "cmd-3"},
+			{PID: 4, GPUIndex: 0, Command: "cmd-4"},
+			{PID: 5, GPUIndex: 0, Command: "cmd-5"},
+		},
+	}
+
+	view := m.renderProcesses()
+	if strings.Contains(view, "cmd-1") || strings.Contains(view, "cmd-2") {
+		t.Fatalf("expected top rows to be clipped from viewport: %q", view)
+	}
+	if !strings.Contains(view, "cmd-3") || !strings.Contains(view, "cmd-5") {
+		t.Fatalf("expected scrolled rows to be visible: %q", view)
+	}
+	if !strings.Contains(view, "showing 3-5 of 5") {
+		t.Fatalf("expected viewport status line: %q", view)
+	}
+}
