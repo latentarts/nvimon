@@ -89,7 +89,7 @@ func TestAggregateSummaryAndSparklineFormatting(t *testing.T) {
 	}
 
 	label, summary = aggregateSummary(gpus, aggregatePower)
-	if label != "power" || summary != "50% 150W" {
+	if label != "power" || summary != "150/300W" {
 		t.Fatalf("power summary = %q %q", label, summary)
 	}
 
@@ -104,7 +104,6 @@ func TestAggregateSummaryAndSparklineFormatting(t *testing.T) {
 	}
 
 }
-
 func TestSegmentedGaugePreservesFilledWidth(t *testing.T) {
 	line := segmentedGauge(model.NewMetricValue(50), 10, []barSegment{
 		{value: 3, style: lipgloss.NewStyle().Foreground(lipgloss.Color("#FFB000"))},
@@ -196,5 +195,38 @@ func TestRenderProcessesUsesViewport(t *testing.T) {
 	}
 	if !strings.Contains(view, "showing 3-5 of 5") {
 		t.Fatalf("expected viewport status line: %q", view)
+	}
+}
+
+func TestRenderSummaryCardShowsPowerInWatts(t *testing.T) {
+	m := New([]hostSource{stubHostSource{name: "host-a"}}, time.Second, 8)
+	card := m.renderSummaryCard(hostState{
+		name: "host-a",
+		snapshot: model.HostSnapshot{
+			HostID:       "host-a",
+			Hostname:     "host-a",
+			GPUBackend:   "sample",
+			Timestamp:    time.Unix(100, 0).UTC(),
+			CPUUsedPct:   model.NewMetricValue(10),
+			RAMUsedBytes: 8,
+			RAMTotalBytes: 16,
+			GPUs: []model.GPUSnapshot{
+				{
+					PowerW:      model.NewMetricValue(120),
+					PowerLimitW: model.NewMetricValue(200),
+				},
+				{
+					PowerW:      model.NewMetricValue(80),
+					PowerLimitW: model.NewMetricValue(200),
+				},
+			},
+		},
+	}, 34)
+
+	if !strings.Contains(card, "200W") {
+		t.Fatalf("summary card missing power watts value: %q", card)
+	}
+	if strings.Contains(card, "50%") {
+		t.Fatalf("summary card still shows power percent: %q", card)
 	}
 }
