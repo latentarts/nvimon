@@ -148,6 +148,24 @@ func TestWarningsToggle(t *testing.T) {
 	}
 }
 
+func TestProcessVizToggle(t *testing.T) {
+	m := New([]hostSource{
+		stubHostSource{name: "local"},
+	}, time.Second, 8)
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'v'}})
+	modelState := updated.(Model)
+	if !modelState.showProcessViz {
+		t.Fatal("expected process viz to be enabled")
+	}
+
+	updated, _ = modelState.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'v'}})
+	modelState = updated.(Model)
+	if modelState.showProcessViz {
+		t.Fatal("expected process viz to be disabled")
+	}
+}
+
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {

@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/lipgloss"
+
 	"github.com/prods/nvimon/internal/collector"
 	"github.com/prods/nvimon/internal/history"
 	"github.com/prods/nvimon/internal/model"
@@ -101,4 +103,41 @@ func TestAggregateSummaryAndSparklineFormatting(t *testing.T) {
 		t.Fatalf("sparkline contains question marks: %q", line)
 	}
 
+}
+
+func TestSegmentedGaugePreservesFilledWidth(t *testing.T) {
+	line := segmentedGauge(model.NewMetricValue(50), 10, []barSegment{
+		{value: 3, style: lipgloss.NewStyle().Foreground(lipgloss.Color("#FFB000"))},
+		{value: 2, style: lipgloss.NewStyle().Foreground(lipgloss.Color("#58A6FF"))},
+	})
+
+	if strings.Count(line, "█") != 5 {
+		t.Fatalf("filled cells = %d, want 5 in %q", strings.Count(line, "█"), line)
+	}
+	if strings.Count(line, "░") != 5 {
+		t.Fatalf("empty cells = %d, want 5 in %q", strings.Count(line, "░"), line)
+	}
+}
+
+func TestProcessVizViewShowsProcessDots(t *testing.T) {
+	sample := collector.NewSampleCollector("host-a", "gpu-a", time.Second)
+	snapshot, err := sample.Collect(context.Background())
+	if err != nil {
+		t.Fatalf("collect sample snapshot: %v", err)
+	}
+
+	m := New([]hostSource{
+		localSource{name: "host-a", collector: sample},
+	}, time.Second, 16)
+	m.width = 120
+	m.height = 40
+	m.showProcessViz = true
+	m.hosts[0].snapshot = snapshot
+	m.hosts[0].lastSuccessful = snapshot.Timestamp
+	m.recordHistory(snapshot)
+
+	view := m.View()
+	if strings.Count(view, "●") < len(snapshot.GPUProcesses) {
+		t.Fatalf("expected process dots for visible processes: %q", view)
+	}
 }

@@ -67,6 +67,7 @@ type Model struct {
 	showHelp      bool
 	showWarnings  bool
 	showProcesses bool
+	showProcessViz bool
 	aggregateMode aggregateMode
 	filterMode    bool
 	processFilter string
@@ -164,6 +165,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if !m.showProcesses {
 				m.filterMode = false
 			}
+			return m, nil
+		case "v":
+			m.showProcessViz = !m.showProcessViz
 			return m, nil
 		case "/":
 			if m.showProcesses {
@@ -351,6 +355,10 @@ type hostProcess struct {
 	process model.GPUProcess
 }
 
+func (p hostProcess) colorKey() string {
+	return fmt.Sprintf("%s/%s/%d", p.host.snapshot.HostID, p.process.GPUUUID, p.process.PID)
+}
+
 func (p hostProcess) matches(filter string) bool {
 	fields := []string{
 		strings.ToLower(p.host.name),
@@ -389,6 +397,25 @@ func (m *Model) recordHistory(snapshot model.HostSnapshot) {
 			m.history.Append(key+"/temp", ts, gpu.TemperatureC.Value)
 		}
 	}
+}
+
+func (m Model) processesForGPU(host hostState, gpu model.GPUSnapshot) []hostProcess {
+	processes := make([]hostProcess, 0)
+	for _, proc := range host.snapshot.GPUProcesses {
+		if proc.GPUUUID == gpu.UUID || proc.GPUIndex == gpu.Index {
+			processes = append(processes, hostProcess{host: host, process: proc})
+		}
+	}
+	return processes
+}
+
+func (m Model) processColor(process hostProcess) lipgloss.Color {
+	key := process.colorKey()
+	var sum int
+	for _, ch := range key {
+		sum += int(ch)
+	}
+	return palette[sum%len(palette)]
 }
 
 func fetchSnapshotsCmd(sources []hostSource, refresh time.Duration) tea.Cmd {
