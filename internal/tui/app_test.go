@@ -148,6 +148,65 @@ func TestWarningsToggle(t *testing.T) {
 	}
 }
 
+func TestProcessVizToggle(t *testing.T) {
+	m := New([]hostSource{
+		stubHostSource{name: "local"},
+	}, time.Second, 8)
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'v'}})
+	modelState := updated.(Model)
+	if !modelState.showProcessViz {
+		t.Fatal("expected process viz to be enabled")
+	}
+
+	updated, _ = modelState.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'v'}})
+	modelState = updated.(Model)
+	if modelState.showProcessViz {
+		t.Fatal("expected process viz to be disabled")
+	}
+}
+
+func TestProcessViewportScrollKeys(t *testing.T) {
+	m := New([]hostSource{
+		stubHostSource{name: "local"},
+	}, time.Second, 8)
+	m.width = 120
+	m.height = 12
+	m.hosts[0].snapshot = model.HostSnapshot{
+		HostID:   "local",
+		Hostname: "local",
+		GPUs: []model.GPUSnapshot{
+			{Index: 0, UUID: "GPU-0"},
+		},
+		GPUProcesses: []model.GPUProcess{
+			{PID: 1, GPUIndex: 0},
+			{PID: 2, GPUIndex: 0},
+			{PID: 3, GPUIndex: 0},
+			{PID: 4, GPUIndex: 0},
+			{PID: 5, GPUIndex: 0},
+			{PID: 6, GPUIndex: 0},
+		},
+	}
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyPgDown})
+	modelState := updated.(Model)
+	if modelState.processScroll == 0 {
+		t.Fatal("expected process viewport to scroll down")
+	}
+
+	updated, _ = modelState.Update(tea.KeyMsg{Type: tea.KeyEnd})
+	modelState = updated.(Model)
+	if modelState.processScroll != modelState.maxProcessScroll() {
+		t.Fatalf("process scroll = %d, want max %d", modelState.processScroll, modelState.maxProcessScroll())
+	}
+
+	updated, _ = modelState.Update(tea.KeyMsg{Type: tea.KeyHome})
+	modelState = updated.(Model)
+	if modelState.processScroll != 0 {
+		t.Fatalf("process scroll = %d, want 0", modelState.processScroll)
+	}
+}
+
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {

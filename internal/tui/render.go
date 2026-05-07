@@ -12,6 +12,7 @@ import (
 )
 
 const cardBorder = 2 // rounded border adds 2 chars (1 each side)
+const gpuCardContentLines = 9
 
 func (m Model) render() string {
 	header := m.renderHeader()
@@ -41,10 +42,12 @@ func (m Model) render() string {
 		overlay := styles.helpBox.Render(strings.Join([]string{
 			"tap/click host rows to select scope",
 			"/ filter processes",
+			"pgup/pgdn home/end scroll process list",
 			"enter apply filter",
 			"esc clear/exit filter",
 			"p pause/resume refresh",
 			"r refresh now",
+			"v toggle process viz",
 			"g cycle aggregate bar mode",
 			"? toggle help",
 		}, "\n"))
@@ -132,8 +135,8 @@ func (m Model) renderSummaryCard(host hostState, width int) string {
 	noData := host.snapshot.Timestamp.IsZero()
 
 	ramPct := memoryPercent(host.snapshot)
-
 	var gpuPct, vramPct, pwrPct, pwrUsedMetric model.MetricValue
+	var vramSegments []barSegment
 	if !noData {
 		var gpuTotal, gpuCount float64
 		var vramUsed, vramTotal uint64
@@ -159,6 +162,20 @@ func (m Model) renderSummaryCard(host hostState, width int) string {
 		}
 		if vramTotal > 0 {
 			vramPct = model.NewMetricValue(float64(vramUsed) / float64(vramTotal) * 100)
+			if m.showProcessViz {
+				for _, proc := range host.snapshot.GPUProcesses {
+					if proc.UsedGPUMemoryBytes == 0 {
+						continue
+					}
+					vramSegments = append(vramSegments, barSegment{
+						value: float64(proc.UsedGPUMemoryBytes),
+						style: lipgloss.NewStyle().Foreground(m.processColor(hostProcess{
+							host:    host,
+							process: proc,
+						})),
+					})
+				}
+			}
 		}
 		if pwrLimit > 0 {
 			pwrPct = model.NewMetricValue(pwrUsed / pwrLimit * 100)
@@ -189,7 +206,7 @@ func (m Model) renderSummaryCard(host hostState, width int) string {
 		rowStyle.Render(styles.label.Render("CPU  ") + gauge(host.snapshot.CPUUsedPct, gaugeBarWidth) + " " + styles.value.Render(model.FormatPercent(host.snapshot.CPUUsedPct))),
 		rowStyle.Render(styles.label.Render("RAM  ") + gauge(ramPct, gaugeBarWidth) + " " + styles.value.Render(model.FormatPercent(ramPct))),
 		rowStyle.Render(styles.label.Render("GPU  ") + gauge(gpuPct, gaugeBarWidth) + " " + styles.value.Render(model.FormatPercent(gpuPct))),
-		rowStyle.Render(styles.label.Render("VRAM ") + gauge(vramPct, gaugeBarWidth) + " " + styles.value.Render(model.FormatPercent(vramPct))),
+		rowStyle.Render(styles.label.Render("VRAM ") + m.renderUsageGauge(vramPct, gaugeBarWidth, vramSegments) + " " + styles.value.Render(model.FormatPercent(vramPct))),
 		rowStyle.Render(styles.label.Render("PWR  ") + gauge(pwrPct, gaugeBarWidth) + " " + styles.value.Render(metricCompact(pwrUsedMetric)+"W")),
 		lastLine,
 	}
@@ -213,44 +230,74 @@ func (m Model) renderGPUCards() string {
 		cardWidth = max(30, (m.width-cols*cardBorder-gap*(cols-1))/cols)
 	}
 
-	rows := make([]string, 0, (len(all)+cols-1)/cols)
+	rowCount := max(1, (len(all)+cols-1)/cols)
+	rowGap := 0
+	cardHeight := gpuCardContentLines + cardBorder
+	if !m.showProcesses {
+		availableHeight := m.gpuSectionHeight()
+		if rowCount > 1 {
+			rowGap = min(2, max(0, (availableHeight-rowCount*cardHeight)/(rowCount-1)))
+		}
+		if availableHeight > 0 {
+			cardHeight = max(cardHeight, (availableHeight-rowGap*(rowCount-1))/rowCount)
+		}
+	}
+
+	rows := make([]string, 0, rowCount*2)
 	for i := 0; i < len(all); i += cols {
 		end := min(i+cols, len(all))
 		rowCards := make([]string, 0, (end-i)*2)
 		for j, item := range all[i:end] {
-			rowCards = append(rowCards, m.renderGPUCard(item, cardWidth))
+			rowCards = append(rowCards, m.renderGPUCard(item, cardWidth, cardHeight))
 			if j < (end-i-1) {
 				rowCards = append(rowCards, "  ")
 			}
 		}
 		rows = append(rows, lipgloss.JoinHorizontal(lipgloss.Top, rowCards...))
+		if rowGap > 0 && end < len(all) {
+			rows = append(rows, strings.Repeat("\n", rowGap-1))
+		}
 	}
 
 	return lipgloss.JoinVertical(lipgloss.Left, rows...)
 }
 
-func (m Model) renderGPUCard(item hostGPU, width int) string {
+func (m Model) renderGPUCard(item hostGPU, width, height int) string {
 	gpu := item.gpu
 	key := gpu.Key(item.host.snapshot.HostID)
 	contentWidth := max(10, width-2)
 
 	memPct := gpu.MemoryUsedPct()
+	memSegments := make([]barSegment, 0)
+	if m.showProcessViz && gpu.MemoryTotalBytes > 0 {
+		for _, proc := range m.processesForGPU(item.host, gpu) {
+			if proc.process.UsedGPUMemoryBytes == 0 {
+				continue
+			}
+			memSegments = append(memSegments, barSegment{
+				value: float64(proc.process.UsedGPUMemoryBytes),
+				style: lipgloss.NewStyle().Foreground(m.processColor(proc)),
+			})
+		}
+	}
 	lines := []string{
 		styles.label.Render(fmt.Sprintf("%s GPU %d", truncate(item.host.name, 10), gpu.Index)),
 		styles.value.Render(fmt.Sprintf("%s (%s)", truncate(gpu.Name, contentWidth-7), fallbackString(gpu.PState, "n/a"))),
 		styles.label.Render("GPU ") + gauge(gpu.GPUUtilPct, contentWidth-12) + " " + styles.value.Render(model.FormatPercent(gpu.GPUUtilPct)),
-		styles.label.Render("MEM ") + gauge(memPct, contentWidth-12) + " " + styles.value.Render(model.FormatPercent(memPct)),
+		styles.label.Render("MEM ") + m.renderUsageGauge(memPct, contentWidth-12, memSegments) + " " + styles.value.Render(model.FormatPercent(memPct)),
 		styles.label.Render("TMP ") + styles.value.Render(metricCompact(gpu.TemperatureC)+"C") + styles.label.Render(" FAN ") + styles.value.Render(metricCompact(gpu.FanPct)) + styles.label.Render(" PWR ") + styles.value.Render(metricCompact(gpu.PowerW)+"W"),
 		styles.label.Render("GPU ") + sparklineWithStyle(m.history.Series(key+"/gpu"), contentWidth-10, 100, styles.sparkGPU) + " " + styles.value.Render(model.FormatPercent(gpu.GPUUtilPct)),
 		styles.label.Render("MEM ") + sparklineWithStyle(m.history.Series(key+"/mem"), contentWidth-10, 100, styles.sparkMem) + " " + styles.value.Render(model.FormatPercent(memPct)),
 		styles.label.Render("PWR ") + sparklineWithStyle(m.history.Series(key+"/power"), contentWidth-10, maxMetric(gpu.PowerLimitW, 300), styles.sparkPower) + " " + styles.value.Render(metricCompact(gpu.PowerW)+"W"),
 		styles.label.Render("TMP ") + sparklineWithStyle(m.history.Series(key+"/temp"), contentWidth-10, 100, styles.sparkTemp) + " " + styles.value.Render(metricCompact(gpu.TemperatureC)+"C"),
 	}
+	lines = stretchCardLines(lines, max(gpuCardContentLines, height-cardBorder))
 
-	return styles.gpuCard.Width(width).Render(strings.Join(lines, "\n"))
+	return styles.gpuCard.Width(width).Height(max(gpuCardContentLines+cardBorder, height)).Render(strings.Join(lines, "\n"))
 }
 
 func (m Model) renderProcesses() string {
+	panelHeight := m.processViewportHeight()
 	lines := []string{styles.label.Render("GPU Processes")}
 	processes := m.filteredProcesses()
 	scopeLabel := "all servers"
@@ -263,12 +310,19 @@ func (m Model) renderProcesses() string {
 	}
 	if len(processes) == 0 {
 		lines = append(lines, "No matching GPU compute processes.")
-		return styles.panel.Width(max(30, m.width)).Render(strings.Join(lines, "\n"))
+		return styles.panel.Width(max(40, m.width)).Height(panelHeight).Render(strings.Join(lines, "\n"))
 	}
 
 	lines = append(lines, styles.tableHead.Render(fmt.Sprintf("%-10s %-7s %-10s %-4s %-9s %-8s %s", "SERVER", "PID", "USER", "GPU", "VRAM", "UTIL", "COMMAND")))
-	for _, row := range processes {
-		lines = append(lines, styles.value.Render(fmt.Sprintf(
+	visibleRows := m.processViewportRows()
+	start := min(m.processScroll, max(0, len(processes)-visibleRows))
+	end := min(len(processes), start+visibleRows)
+	for _, row := range processes[start:end] {
+		prefix := ""
+		if m.showProcessViz {
+			prefix = lipgloss.NewStyle().Foreground(m.processColor(row)).Render("●") + " "
+		}
+		lines = append(lines, prefix+styles.value.Render(fmt.Sprintf(
 			"%-10s %-7d %-10s %-4d %-9s %-8s %s",
 			truncate(row.host.name, 10),
 			row.process.PID,
@@ -279,12 +333,13 @@ func (m Model) renderProcesses() string {
 			truncate(row.process.Command, max(12, m.width-60)),
 		)))
 	}
+	lines = append(lines, styles.muted.Render(fmt.Sprintf("showing %d-%d of %d  pgup/pgdn home/end scroll", start+1, end, len(processes))))
 
-	return styles.panel.Width(max(40, m.width)).Render(strings.Join(lines, "\n"))
+	return styles.panel.Width(max(40, m.width)).Height(panelHeight).Render(strings.Join(lines, "\n"))
 }
 
 func (m Model) renderFooter() string {
-	message := "0 all  1-9 server  j/k cycle  click/tap host  / filter  w warnings  x toggle-proc  esc clear  p pause  r refresh  g aggregate  ? help"
+	message := "0 all  1-9 server  j/k cycle  pgup/pgdn proc-scroll  click/tap host  / filter  w warnings  x toggle-proc  v process-viz  esc clear  p pause  r refresh  g aggregate  ? help"
 	if m.lastError != "" {
 		message += "  error: " + m.lastError
 	}
@@ -322,6 +377,127 @@ func gauge(metric model.MetricValue, width int) string {
 		filled = width
 	}
 	return styles.barFilled.Render(strings.Repeat("█", filled)) + styles.barEmpty.Render(strings.Repeat("░", width-filled))
+}
+
+type barSegment struct {
+	value float64
+	style lipgloss.Style
+}
+
+func (m Model) renderUsageGauge(metric model.MetricValue, width int, segments []barSegment) string {
+	if !m.showProcessViz || len(segments) == 0 {
+		return gauge(metric, width)
+	}
+	return segmentedGauge(metric, width, segments)
+}
+
+func segmentedGauge(metric model.MetricValue, width int, segments []barSegment) string {
+	if !metric.IsKnown() {
+		return styles.muted.Render(strings.Repeat("·", width))
+	}
+	if width <= 0 {
+		return ""
+	}
+
+	totalFilled := int((metric.Value / 100.0) * float64(width))
+	if totalFilled < 0 {
+		totalFilled = 0
+	}
+	if totalFilled > width {
+		totalFilled = width
+	}
+	if totalFilled == 0 {
+		return styles.barEmpty.Render(strings.Repeat("░", width))
+	}
+
+	weights := make([]float64, len(segments))
+	var totalValue float64
+	for i, seg := range segments {
+		if seg.value <= 0 {
+			continue
+		}
+		weights[i] = seg.value
+		totalValue += seg.value
+	}
+	if totalValue <= 0 {
+		return gauge(metric, width)
+	}
+
+	counts := make([]int, len(segments))
+	remainders := make([]float64, len(segments))
+	used := 0
+	for i, weight := range weights {
+		if weight <= 0 {
+			continue
+		}
+		exact := (weight / totalValue) * float64(totalFilled)
+		counts[i] = int(exact)
+		remainders[i] = exact - float64(counts[i])
+		used += counts[i]
+	}
+	for used < totalFilled {
+		best := -1
+		bestRem := -1.0
+		for i, weight := range weights {
+			if weight <= 0 {
+				continue
+			}
+			if remainders[i] > bestRem {
+				best = i
+				bestRem = remainders[i]
+			}
+		}
+		if best == -1 {
+			break
+		}
+		counts[best]++
+		remainders[best] = 0
+		used++
+	}
+
+	var builder strings.Builder
+	for i, count := range counts {
+		if count <= 0 {
+			continue
+		}
+		builder.WriteString(segments[i].style.Render(strings.Repeat("█", count)))
+	}
+	if totalFilled < width {
+		builder.WriteString(styles.barEmpty.Render(strings.Repeat("░", width-totalFilled)))
+	}
+	return builder.String()
+}
+
+func stretchCardLines(lines []string, target int) []string {
+	if len(lines) >= target || len(lines) < 2 {
+		return lines
+	}
+
+	extra := target - len(lines)
+	priorities := []int{1, 3, 4, 5, 6, 7, 2, 0}
+	insertAfter := make([]int, len(lines)-1)
+	for i := 0; i < extra; i++ {
+		gap := priorities[i%len(priorities)]
+		if gap >= len(insertAfter) {
+			gap = len(insertAfter) - 1
+		}
+		if gap < 0 {
+			gap = 0
+		}
+		insertAfter[gap]++
+	}
+
+	stretched := make([]string, 0, target)
+	for i, line := range lines {
+		stretched = append(stretched, line)
+		if i >= len(insertAfter) {
+			continue
+		}
+		for j := 0; j < insertAfter[i]; j++ {
+			stretched = append(stretched, "")
+		}
+	}
+	return stretched
 }
 
 func sparkline(points []history.Point, width int, maxValue float64) string {
@@ -425,6 +601,23 @@ func maxMetric(v model.MetricValue, fallback float64) float64 {
 		return v.Value
 	}
 	return fallback
+}
+
+func (m Model) gpuSectionHeight() int {
+	if m.height <= 0 {
+		return gpuCardContentLines + cardBorder
+	}
+	header := lipgloss.Height(m.renderHeader())
+	footer := lipgloss.Height(m.renderFooter())
+	selectorWidth := hostSelectorWidth()
+	summaryWidth := max(30, m.width-selectorWidth-1)
+	topRow := lipgloss.JoinHorizontal(
+		lipgloss.Top,
+		m.renderHostSelector(),
+		m.renderSummary(summaryWidth),
+	)
+	available := m.height - header - footer - lipgloss.Height(topRow)
+	return max(gpuCardContentLines+cardBorder, available)
 }
 
 func formatUptime(seconds uint64) string {
